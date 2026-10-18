@@ -1,0 +1,71 @@
+name: Native composer keyboard
+
+on:
+  push:
+    branches: [test/composer-native-input-review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-input:
+    if: github.repository == 'Gustav0ar/t3code'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+      - name: Install test dependencies
+        run: vp install --frozen-lockfile --filter @t3tools/web... --filter @t3tools/desktop...
+      - name: Ensure Electron
+        run: node apps/desktop/scripts/ensure-electron-runtime.mjs
+      - name: Register Windows keyboard layouts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $languages = New-WinUserLanguageList en-US
+          $languages[0].InputMethodTips.Clear()
+          $languages[0].InputMethodTips.Add('0409:00000409')
+          $languages[0].InputMethodTips.Add('0409:00020409')
+          Set-WinUserLanguageList $languages -Force
+      - name: Install video encoder
+        run: node apps/web/node_modules/playwright/cli.js install ffmpeg
+      - name: Compile macOS key driver
+        if: runner.os == 'macOS'
+        run: swiftc scripts/native-composer/macos.swift -o scripts/native-composer/macos-input
+      - name: Record macOS baseline
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          NATIVE_COMPOSER_BASELINE: "1"
+        run: |
+          composer_source=apps/web/src/components/ComposerPromptEditorTiptap.tsx
+          cp "$composer_source" "$RUNNER_TEMP/composer-fixed.tsx"
+          trap 'cp "$RUNNER_TEMP/composer-fixed.tsx" "$composer_source"' EXIT
+          git show b72740852ffb5ab727e1ae7c042d9e89533bc341:"$composer_source" > "$composer_source"
+          node scripts/native-composer/run.mjs
+      - name: Native keyboard test
+        run: node scripts/native-composer/run.mjs
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-composer-${{ matrix.os }}
+          path: .native-composer-results/
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 90
