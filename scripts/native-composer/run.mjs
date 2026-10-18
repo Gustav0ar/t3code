@@ -116,34 +116,66 @@ try {
       logs.push(mapped.stdout, mapped.stderr, query.stdout);
       linuxLayout = layout;
     }
-    const result =
-      NodeProcess.platform === "linux"
-        ? await run(
-            NodePath.resolve("scripts/native-composer/linux-input"),
-            [backend, layout, sequence],
-            { timeout: 30_000 },
-          )
-        : NodeProcess.platform === "win32"
-          ? await run(
-              "pwsh",
-              [
-                "-NoProfile",
-                "-File",
-                NodePath.resolve("scripts/native-composer/windows.ps1"),
-                "-Layout",
-                layout === "intl" ? "00020409" : "00000409",
-                "-Keys",
-                sequence,
-                "-WindowHandle",
-                hwnd,
-              ],
-              { timeout: 30_000 },
-            )
-          : await run(
-              NodePath.resolve("scripts/native-composer/macos-input"),
-              [layout, sequence, String(pid)],
-              { timeout: 30_000 },
-            );
+    const keymapEventStart =
+      backend === "wayland" ? await page.evaluate(() => window.keyboardEvents.length) : 0;
+    let execution;
+    if (NodeProcess.platform === "linux") {
+      execution = run(
+        NodePath.resolve("scripts/native-composer/linux-input"),
+        [backend, layout, sequence],
+        { timeout: 30_000 },
+      );
+    } else if (NodeProcess.platform === "win32") {
+      execution = run(
+        "pwsh",
+        [
+          "-NoProfile",
+          "-File",
+          NodePath.resolve("scripts/native-composer/windows.ps1"),
+          "-Layout",
+          layout === "intl" ? "00020409" : "00000409",
+          "-Keys",
+          sequence,
+          "-WindowHandle",
+          hwnd,
+        ],
+        { timeout: 30_000 },
+      );
+    } else {
+      execution = run(
+        NodePath.resolve("scripts/native-composer/macos-input"),
+        [layout, sequence, String(pid)],
+        { timeout: 30_000 },
+      );
+    }
+    if (backend === "wayland") {
+      try {
+        await Promise.race([
+          page.waitForFunction(
+            (start) =>
+              window.keyboardEvents
+                .slice(start)
+                .some(
+                  (event) =>
+                    event.type === "keyup" &&
+                    event.code === "ShiftLeft" &&
+                    event.key === "Shift" &&
+                    event.trusted,
+                ),
+            keymapEventStart,
+            { timeout: 5000 },
+          ),
+          execution.then(() => {
+            throw new Error("Native driver exited before keymap acknowledgement");
+          }),
+        ]);
+        execution.child.stdin.end("\n");
+      } catch (error) {
+        execution.child.kill("SIGTERM");
+        throw error;
+      }
+    }
+    const result = await execution;
     logs.push(result.stdout, result.stderr);
   }
   let activeLayout;

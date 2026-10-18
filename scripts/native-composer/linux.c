@@ -98,6 +98,11 @@ int main(int argc, char **argv) {
     char symbol[64];
     xkb_keysym_get_name(xkb_state_key_get_one_sym(state, KEY_APOSTROPHE + 8), symbol, sizeof(symbol));
     printf("backend=wayland layout=us variant=%s quote=%s\n", intl ? "intl" : "", symbol);
+    // Confirm the new keymap reached Chromium with a native modifier release
+    // before sending the requested sequence.
+    wayland_key(display, keyboard, state, KEY_LEFTSHIFT, true);
+    wayland_key(display, keyboard, state, KEY_LEFTSHIFT, false);
+    if (getchar() != '\n') fail("Controller did not acknowledge the native keymap");
   } else {
     xdisplay = XOpenDisplay(NULL);
     if (!xdisplay) fail("Cannot connect to isolated X11 display");
