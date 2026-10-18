@@ -224,6 +224,24 @@ const SURROUND_CLOSE: Record<string, string> = {
   _: "_",
 };
 
+function canSurroundComposerRange(doc: ProseMirrorNode, from: number, to: number) {
+  if (from === to) return false;
+  // Wrapping styled text or inline chips would discard their formatting or context.
+  let touchesSpecial = false;
+  doc.nodesBetween(from, to, (node) => {
+    if ((node.isAtom && node.isInline && !node.isText) || (node.isText && node.marks.length > 0)) {
+      touchesSpecial = true;
+      return false;
+    }
+    return true;
+  });
+  if (touchesSpecial) return false;
+  const map = serializeEditorDoc(doc);
+  const startMd = flatToMarkdown(map, pmToFlat(map, from));
+  const endMd = flatToMarkdown(map, pmToFlat(map, to));
+  return !selectionTouchesMentionBoundary(map.value, startMd, endMd);
+}
+
 function resolvedThemeFromDocument(): "light" | "dark" {
   return document.documentElement.classList.contains("dark") ? "dark" : "light";
 }
@@ -928,6 +946,10 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
   const importFragmentRef = useRef(importContextFragment);
   const latestValueRef = useRef(value);
   const editorHolder = useRef<TiptapEditor | null>(null);
+  const compositionSelectionRef = useRef<{
+    state: EditorState;
+    compositionId: number | null;
+  } | null>(null);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -1105,7 +1127,79 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
       editable: !disabled,
       editorProps: {
         attributes: editorAttributes,
+        handleDOMEvents: {
+          compositionstart: (view) => {
+            const pending = compositionSelectionRef.current;
+            if (
+              !pending ||
+              pending.state.doc !== view.state.doc ||
+              !view.state.selection.empty ||
+              view.state.selection.from !== pending.state.selection.from
+            ) {
+              compositionSelectionRef.current = null;
+            }
+            return false;
+          },
+          compositionend: (view, event) => {
+            const previous = compositionSelectionRef.current;
+            const text = event.data;
+            if (!previous) return false;
+            const closer = text.length === 1 ? SURROUND_CLOSE[text] : undefined;
+            // Like Tiptap's input rules, wait for ProseMirror to commit the composition.
+            setTimeout(() => {
+              if (compositionSelectionRef.current !== previous) return;
+              compositionSelectionRef.current = null;
+              if (view.isDestroyed || view.composing) return;
+              const { from, to } = previous.state.selection;
+              const committed = previous.state.tr
+                .setSelection(TextSelection.create(previous.state.doc, from))
+                .insertText(text, from, from);
+              if (
+                !view.state.doc.eq(committed.doc) ||
+                !view.state.selection.eq(committed.selection)
+              )
+                return;
+              const tr = view.state.tr;
+              const start = from + text.length;
+              const end = to + text.length;
+              if (closer) {
+                tr.insertText(closer, end);
+                tr.setSelection(TextSelection.create(tr.doc, start, end));
+              } else if (text.length > 0) {
+                tr.delete(start, end);
+                tr.setSelection(TextSelection.create(tr.doc, start));
+              } else {
+                tr.setSelection(TextSelection.create(tr.doc, from, to));
+              }
+              if (previous.compositionId !== null)
+                tr.setMeta("composition", previous.compositionId);
+              view.dispatch(tr);
+            });
+            return false;
+          },
+        },
         handleKeyDown: (view, event) => {
+          if (
+            (event.key === "Dead" ||
+              (event.key === "Process" &&
+                (event.code === "Quote" || event.code === "Backquote"))) &&
+            !literalText &&
+            !view.composing
+          ) {
+            const { state } = view;
+            const selection = TextSelection.between(state.selection.$from, state.selection.$to);
+            if (canSurroundComposerRange(state.doc, selection.from, selection.to)) {
+              if (!selection.eq(state.selection)) view.dispatch(state.tr.setSelection(selection));
+              compositionSelectionRef.current = { state: view.state, compositionId: null };
+              // Wayland reports Process on keydown and Dead only on keyup. Collapse
+              // before composition starts so native input leaves the selected text in place.
+              view.dispatch(
+                view.state.tr.setSelection(TextSelection.create(view.state.doc, selection.from)),
+              );
+            } else {
+              compositionSelectionRef.current = null;
+            }
+          }
           if (
             isMacPlatform(navigator.platform) &&
             (event.key === "Home" || event.key === "End") &&
@@ -1298,25 +1392,13 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
         handleTextInput: (view, from, to, text) => {
           if (literalText || text.length !== 1) return false;
           const closer = SURROUND_CLOSE[text];
-          if (!closer || from === to) return false;
-          // Never wrap chips or other atoms, and never wrap styled text: the
-          // default replace keeps marks intact, wrapping would drop them.
-          let touchesSpecial = false;
-          view.state.doc.nodesBetween(from, to, (node) => {
-            if (
-              (node.isAtom && node.isInline && !node.isText) ||
-              (node.isText && node.marks.length > 0)
-            ) {
-              touchesSpecial = true;
-              return false;
-            }
-            return true;
-          });
-          if (touchesSpecial) return false;
-          const map = serializeEditorDoc(view.state.doc);
-          const startMd = flatToMarkdown(map, pmToFlat(map, from));
-          const endMd = flatToMarkdown(map, pmToFlat(map, to));
-          if (selectionTouchesMentionBoundary(map.value, startMd, endMd)) return false;
+          // Composition replacement ranges can span text without an actual selection.
+          if (
+            !closer ||
+            view.state.selection.empty ||
+            !canSurroundComposerRange(view.state.doc, from, to)
+          )
+            return false;
           const tr = view.state.tr.insertText(closer, to).insertText(text, from);
           tr.setSelection(TextSelection.create(tr.doc, from + text.length, to + text.length));
           view.dispatch(tr);
@@ -1406,6 +1488,11 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
           }
           return true;
         },
+      },
+      onTransaction: ({ transaction }) => {
+        const pending = compositionSelectionRef.current;
+        const compositionId = transaction.getMeta("composition");
+        if (pending && typeof compositionId === "number") pending.compositionId = compositionId;
       },
       onUpdate: ({ editor: updated }) => {
         handleEditorChange(updated);
