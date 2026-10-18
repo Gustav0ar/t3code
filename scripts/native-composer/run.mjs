@@ -16,6 +16,7 @@ const logs = [];
 const server = NodeChildProcess.spawn("vp", ["dev", "--host", "127.0.0.1", "--port", "5733"], {
   cwd: NodePath.resolve("apps/web"),
   shell: NodeProcess.platform === "win32",
+  detached: NodeProcess.platform !== "win32",
   env: { ...NodeProcess.env, T3CODE_SINGLE_ORIGIN_DEV: "1" },
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -315,5 +316,13 @@ try {
   await NodeFSP.writeFile(NodePath.join(results, "report.json"), JSON.stringify(report, null, 2));
   await NodeFSP.writeFile(NodePath.join(results, "runner.log"), logs.join("\n"));
   if (electron) await electron.close();
-  server.kill();
+  if (NodeProcess.platform === "win32") {
+    await run("taskkill", ["/PID", String(server.pid), "/T", "/F"]).catch(() => {});
+  } else {
+    try {
+      NodeProcess.kill(-server.pid, "SIGTERM");
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  }
 }
