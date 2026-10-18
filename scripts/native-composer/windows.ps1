@@ -1,4 +1,4 @@
-param([string]$Layout, [string]$Keys, [long]$WindowHandle)
+param([string]$Layout, [string]$Keys, [long]$WindowHandle, [switch]$Probe)
 $ErrorActionPreference = 'Stop'
 Add-Type @'
 using System;
@@ -45,6 +45,16 @@ public static class NativeKeys {
   }
 }
 '@
+if ($Probe) {
+  Add-Type -AssemblyName System.Windows.Forms
+  $form = [System.Windows.Forms.Form]::new()
+  $box = [System.Windows.Forms.TextBox]::new()
+  $form.Controls.Add($box)
+  $form.Show()
+  $box.Focus() | Out-Null
+  [System.Windows.Forms.Application]::DoEvents()
+  $WindowHandle = $form.Handle.ToInt64()
+}
 $actual = [NativeKeys]::Layout([IntPtr]$WindowHandle, $Layout)
 foreach ($key in $Keys.Split(',', [StringSplitOptions]::RemoveEmptyEntries)) {
   if ($key -eq 'pause') { Start-Sleep -Milliseconds 350; continue }
@@ -54,5 +64,7 @@ foreach ($key in $Keys.Split(',', [StringSplitOptions]::RemoveEmptyEntries)) {
   [NativeKeys]::Key($scan, $false)
   [NativeKeys]::Key($scan, $true)
   if ($shift) { [NativeKeys]::Key(0x2A, $true) }
+  if ($Probe) { [System.Windows.Forms.Application]::DoEvents() }
 }
+if ($Probe) { Write-Output "native-textbox=$($box.Text)"; $form.Close() }
 Write-Output "layout=$Layout active=$actual"

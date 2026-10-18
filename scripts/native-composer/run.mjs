@@ -90,10 +90,13 @@ try {
     logs.push(result.stdout, result.stderr);
   }
   // A native textarea proves the layout and OS injection work before any composer verdict.
+  let probeFailures = 0;
   for (const [layout, sequence, expected] of [
     ["us", "quote", "'"],
     ["intl", "quote,pause,space", "'"],
     ["intl", "quote,pause,e", "é"],
+    ["intl", "quote,space", "'"],
+    ["intl", "quote,e", "é"],
   ]) {
     await page.locator("#control").evaluate((element) => {
       element.value = "";
@@ -101,11 +104,18 @@ try {
       window.keyboardEvents.length = 0;
     });
     await keys(layout, sequence);
-    await page.waitForFunction(
-      (expected) => document.querySelector("#control").value === expected,
-      expected,
-      { timeout: 5000 },
-    );
+    let failure;
+    try {
+      await page.waitForFunction(
+        (expected) => document.querySelector("#control").value === expected,
+        expected,
+        { timeout: 5000 },
+      );
+    } catch (error) {
+      failure = String(error);
+      probeFailures++;
+    }
+    const actual = await page.locator("#control").inputValue();
     const events = await page.evaluate(() => window.keyboardEvents);
     NodeAssert.ok(
       events.some((event) => event.type === "keydown" && event.trusted),
@@ -116,8 +126,33 @@ try {
         events.some((event) => event.key === "Dead" || event.type === "compositionstart"),
         "No native dead-key evidence",
       );
-    report.push({ type: "layout-probe", layout, expected, events });
-    console.log(`PASS native layout probe ${layout}: ${expected}`);
+    report.push({ type: "layout-probe", layout, sequence, expected, actual, failure, events });
+    console.log(
+      `${failure ? "FAIL" : "PASS"} native layout probe ${layout} ${sequence}: ${JSON.stringify(actual)}`,
+    );
+  }
+  if (probeFailures) {
+    if (NodeProcess.platform === "win32") {
+      for (const sequence of ["quote,pause,space", "quote,pause,e"]) {
+        const result = await run(
+          "pwsh",
+          [
+            "-STA",
+            "-NoProfile",
+            "-File",
+            NodePath.resolve("scripts/native-composer/windows.ps1"),
+            "-Layout",
+            "00020409",
+            "-Keys",
+            sequence,
+            "-Probe",
+          ],
+          { timeout: 30000 },
+        );
+        logs.push(`WinForms ${sequence}: ${result.stdout}`, result.stderr);
+      }
+    }
+    throw new Error(`${probeFailures} native layout probes failed; composer tests were not run`);
   }
   const cases = [
     {

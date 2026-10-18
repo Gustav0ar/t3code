@@ -33,6 +33,15 @@ jobs:
         run: vp install --frozen-lockfile --filter @t3tools/web... --filter @t3tools/desktop...
       - name: Ensure Electron
         run: node apps/desktop/scripts/ensure-electron-runtime.mjs
+      - name: Register Windows keyboard layouts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $languages = New-WinUserLanguageList en-US
+          $languages[0].InputMethodTips.Clear()
+          $languages[0].InputMethodTips.Add('0409:00000409')
+          $languages[0].InputMethodTips.Add('0409:00020409')
+          Set-WinUserLanguageList $languages -Force
       - name: Install video encoder
         run: node apps/web/node_modules/playwright/cli.js install ffmpeg
       - name: Compile macOS key driver
