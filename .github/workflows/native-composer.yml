@@ -56,6 +56,7 @@ jobs:
           composer_source=apps/web/src/components/ComposerPromptEditorTiptap.tsx
           cp "$composer_source" "$RUNNER_TEMP/composer-fixed.tsx"
           trap 'cp "$RUNNER_TEMP/composer-fixed.tsx" "$composer_source"' EXIT
+          git fetch --no-tags --depth=1 origin b72740852ffb5ab727e1ae7c042d9e89533bc341
           git show b72740852ffb5ab727e1ae7c042d9e89533bc341:"$composer_source" > "$composer_source"
           node scripts/native-composer/run.mjs
       - name: Native keyboard test
