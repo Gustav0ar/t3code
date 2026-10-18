@@ -1,0 +1,268 @@
+import assert from "node:assert/strict";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { createRequire } from "node:module";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+const run = promisify(execFile);
+const requireWeb = createRequire(path.resolve("apps/web/package.json"));
+const requireDesktop = createRequire(path.resolve("apps/desktop/package.json"));
+const { _electron } = requireWeb("playwright");
+const results = path.resolve(".native-composer-results");
+await mkdir(results, { recursive: true });
+const logs = [];
+const server = spawn(
+  process.platform === "win32" ? "vp.cmd" : "vp",
+  ["dev", "--host", "127.0.0.1", "--port", "5733"],
+  {
+    cwd: path.resolve("apps/web"),
+    shell: process.platform === "win32",
+    env: { ...process.env, T3CODE_SINGLE_ORIGIN_DEV: "1" },
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
+server.stdout.on("data", (value) => logs.push(value.toString()));
+server.stderr.on("data", (value) => logs.push(value.toString()));
+const report = [];
+let electron;
+let page;
+try {
+  const deadline = Date.now() + 120_000;
+  while (true) {
+    try {
+      if ((await fetch("http://127.0.0.1:5733/native-composer.html")).ok) break;
+    } catch {}
+    if (Date.now() > deadline || server.exitCode !== null)
+      throw new Error(`Vite did not start: ${logs.join("")}`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  const env = {
+    ...process.env,
+    NATIVE_COMPOSER_URL: "http://127.0.0.1:5733/native-composer.html",
+    T3CODE_HOME: path.join(results, "profile"),
+    T3CODE_DISABLE_AUTO_UPDATE: "true",
+  };
+  delete env.ELECTRON_RUN_AS_NODE;
+  electron = await _electron.launch({
+    executablePath: requireDesktop("electron"),
+    args: [
+      path.resolve("scripts/native-composer/electron.cjs"),
+      `--user-data-dir=${path.join(results, "electron")}`,
+    ],
+    env,
+    timeout: 120_000,
+    recordVideo: { dir: path.join(results, "video"), size: { width: 1000, height: 600 } },
+  });
+  page = await electron.firstWindow();
+  page.on("pageerror", (error) => logs.push(error.stack));
+  await page.waitForFunction(() => Boolean(window.nativeComposer), { timeout: 120_000 });
+  const hwnd = await electron.evaluate(({ BrowserWindow }) => {
+    const buffer = BrowserWindow.getAllWindows()[0].getNativeWindowHandle();
+    return process.platform === "win32" ? buffer.readBigUInt64LE().toString() : "0";
+  });
+  const pid = electron.process().pid;
+  async function keys(layout, sequence) {
+    await electron.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      window.show();
+      window.focus();
+    });
+    const result =
+      process.platform === "win32"
+        ? await run(
+            "pwsh",
+            [
+              "-NoProfile",
+              "-File",
+              path.resolve("scripts/native-composer/windows.ps1"),
+              "-Layout",
+              layout === "intl" ? "00020409" : "00000409",
+              "-Keys",
+              sequence,
+              "-WindowHandle",
+              hwnd,
+            ],
+            { timeout: 30_000 },
+          )
+        : await run(
+            path.resolve("scripts/native-composer/macos-input"),
+            [layout, sequence, String(pid)],
+            { timeout: 30_000 },
+          );
+    logs.push(result.stdout, result.stderr);
+  }
+  // A native textarea proves the layout and OS injection work before any composer verdict.
+  for (const [layout, sequence, expected] of [
+    ["us", "quote", "'"],
+    ["intl", "quote,pause,space", "'"],
+    ["intl", "quote,pause,e", "é"],
+  ]) {
+    await page.locator("#control").evaluate((element) => {
+      element.value = "";
+      element.focus();
+      window.keyboardEvents.length = 0;
+    });
+    await keys(layout, sequence);
+    await page.waitForFunction(
+      (expected) => document.querySelector("#control").value === expected,
+      expected,
+      { timeout: 5000 },
+    );
+    const events = await page.evaluate(() => window.keyboardEvents);
+    assert(
+      events.some((event) => event.type === "keydown" && event.trusted),
+      "Native input did not reach the browser",
+    );
+    if (layout === "intl")
+      assert(
+        events.some((event) => event.key === "Dead" || event.type === "compositionstart"),
+        "No native dead-key evidence",
+      );
+    report.push({ type: "layout-probe", layout, expected, events });
+    console.log(`PASS native layout probe ${layout}: ${expected}`);
+  }
+  const cases = [
+    {
+      name: "ordinary-apostrophe",
+      layout: "us",
+      sequence: "quote",
+      text: "we",
+      selected: false,
+      expected: "we'",
+    },
+    {
+      name: "ordinary-surround",
+      layout: "us",
+      sequence: "quote",
+      text: "word",
+      selected: true,
+      expected: "'word'",
+      selection: "word",
+    },
+    {
+      name: "dead-apostrophe",
+      layout: "intl",
+      sequence: "quote,pause,space",
+      text: "we",
+      selected: false,
+      expected: "we'",
+    },
+    {
+      name: "dead-double-quote",
+      layout: "intl",
+      sequence: "double,pause,space",
+      text: "",
+      selected: false,
+      expected: '"',
+    },
+    {
+      name: "dead-apostrophe-surround",
+      layout: "intl",
+      sequence: "quote,pause,space",
+      text: "word",
+      selected: true,
+      expected: "'word'",
+      selection: "word",
+    },
+    {
+      name: "dead-double-surround",
+      layout: "intl",
+      sequence: "double,pause,space",
+      text: "word",
+      selected: true,
+      expected: '"word"',
+      selection: "word",
+    },
+    {
+      name: "accented-letter",
+      layout: "intl",
+      sequence: "quote,pause,e",
+      text: "",
+      selected: false,
+      expected: "é",
+    },
+    {
+      name: "accent-replaces-selection",
+      layout: "intl",
+      sequence: "quote,pause,e",
+      text: "word",
+      selected: true,
+      expected: "é",
+    },
+  ];
+  let failures = 0;
+  for (const richText of [true, false]) {
+    for (const test of cases) {
+      const name = `${richText ? "rich" : "plain"}-${test.name}`;
+      await page.evaluate(
+        ({ test, richText }) => {
+          window.nativeComposer.mount(test.text, test.selected, richText);
+          window.keyboardEvents.length = 0;
+        },
+        { test, richText },
+      );
+      await page.screenshot({ path: path.join(results, `${name}-before.png`) });
+      let failure;
+      try {
+        await keys(test.layout, test.sequence);
+        await page.waitForFunction(
+          (expected) => {
+            const state = window.nativeComposer.snapshot();
+            return state.text === expected && !state.composing;
+          },
+          test.expected,
+          { timeout: 5000 },
+        );
+        const state = await page.evaluate(() => window.nativeComposer.snapshot());
+        assert.equal(state.selected, test.selection ?? "");
+        if (test.selection) {
+          const evidence = await page.evaluate(() => window.nativeComposer.evidence());
+          assert(
+            evidence.events.every((event) => event.text.includes(test.text)),
+            "Selected text disappeared in a transaction",
+          );
+          assert(
+            evidence.frames.every((text) => text.includes(test.text)),
+            "Selected text disappeared in a rendered frame",
+          );
+          const undo = await page.evaluate(() => window.nativeComposer.undo());
+          assert.equal(undo.text, test.text, "Undo did not restore the original text");
+          const redo = await page.evaluate(() => window.nativeComposer.redo());
+          assert.equal(redo.text, test.expected, "Redo did not restore wrapping");
+        }
+      } catch (error) {
+        failure = String(error);
+        failures++;
+      }
+      const evidence = await page.evaluate(() => ({
+        ...window.nativeComposer.evidence(),
+        keyboard: window.keyboardEvents,
+      }));
+      report.push({ name, ...test, richText, failure, ...evidence });
+      await page.screenshot({ path: path.join(results, `${name}-after.png`) });
+      await writeFile(path.join(results, "report.json"), JSON.stringify(report, null, 2));
+      console.log(`${failure ? "FAIL" : "PASS"} ${name}${failure ? `: ${failure}` : ""}`);
+    }
+  }
+  if (failures) throw new Error(`${failures} native composer cases failed`);
+} catch (error) {
+  await writeFile(path.join(results, "failure.txt"), error.stack ?? String(error));
+  if (page) {
+    await page.screenshot({ path: path.join(results, "failure.png") }).catch(() => {});
+    await writeFile(
+      path.join(results, "keyboard-events.json"),
+      JSON.stringify(
+        await page.evaluate(() => window.keyboardEvents ?? []).catch(() => []),
+        null,
+        2,
+      ),
+    );
+  }
+  throw error;
+} finally {
+  await writeFile(path.join(results, "report.json"), JSON.stringify(report, null, 2));
+  await writeFile(path.join(results, "runner.log"), logs.join("\n"));
+  if (electron) await electron.close();
+  server.kill();
+}
