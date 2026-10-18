@@ -18,12 +18,22 @@ public static class NativeKeys {
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr process);
   [DllImport("user32.dll")] static extern IntPtr GetKeyboardLayout(uint thread);
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+  [StructLayout(LayoutKind.Sequential)] public struct GUITHREADINFO {
+    public uint size, flags;
+    public IntPtr active, focus, capture, menuOwner, moveSize, caret;
+    public int left, top, right, bottom;
+  }
+  [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
   public static string Layout(IntPtr window, string layout) {
     SetForegroundWindow(window);
-    var hkl=LoadKeyboardLayout(layout, 0);
+    var hkl=LoadKeyboardLayout(layout, 1);
     if(hkl==IntPtr.Zero) throw new Exception("Cannot load keyboard layout");
     SendMessage(window, 0x50, IntPtr.Zero, hkl);
-    var actual=GetKeyboardLayout(GetWindowThreadProcessId(window, IntPtr.Zero));
+    var info=new GUITHREADINFO { size=(uint)Marshal.SizeOf<GUITHREADINFO>() };
+    if(!GetGUIThreadInfo(0,ref info)) throw new Exception("Cannot inspect focused native window");
+    var target=info.focus==IntPtr.Zero?window:info.focus;
+    SendMessage(target, 0x50, IntPtr.Zero, hkl);
+    var actual=GetKeyboardLayout(GetWindowThreadProcessId(target, IntPtr.Zero));
     if(actual!=hkl) throw new Exception("Target window did not activate layout");
     return actual.ToInt64().ToString("X");
   }

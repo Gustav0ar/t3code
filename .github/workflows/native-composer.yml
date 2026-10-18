@@ -45,7 +45,12 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: native-composer-${{ matrix.os }}
-          path: .native-composer-results/
+          path: |
+            .native-composer-results/*.json
+            .native-composer-results/*.txt
+            .native-composer-results/*.log
+            .native-composer-results/*.png
+            .native-composer-results/video/*.webm
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 7
