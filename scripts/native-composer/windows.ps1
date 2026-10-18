@@ -17,6 +17,7 @@ public static class NativeKeys {
   [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wp, IntPtr lp);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr process);
   [DllImport("user32.dll")] static extern IntPtr GetKeyboardLayout(uint thread);
+  [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint kind);
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
   [StructLayout(LayoutKind.Sequential)] public struct GUITHREADINFO {
     public uint size, flags;
@@ -38,7 +39,7 @@ public static class NativeKeys {
     return actual.ToInt64().ToString("X");
   }
   public static void Key(ushort scan, bool up) {
-    var input=new INPUT { type=1, data=new INPUTUNION { keyboard=new KEYBDINPUT { scan=scan, flags=8u|(up?2u:0u) } } };
+    var input=new INPUT { type=1, data=new INPUTUNION { keyboard=new KEYBDINPUT { vk=(ushort)MapVirtualKey(scan,3), scan=scan, flags=up?2u:0u } } };
     if(SendInput(1,new[]{input},Marshal.SizeOf<INPUT>())!=1) throw new Exception("SendInput failed");
     Thread.Sleep(30);
   }

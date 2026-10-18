@@ -9,7 +9,7 @@ func sourceID(_ source: TISInputSource) -> String {
 
 let args = CommandLine.arguments
 let desired = args[1] == "intl" ? "com.apple.keylayout.USInternational-PC" : "com.apple.keylayout.US"
-let sources = TISCreateInputSourceList(nil, false).takeRetainedValue() as! [TISInputSource]
+let sources = TISCreateInputSourceList(nil, true).takeRetainedValue() as! [TISInputSource]
 guard let source = sources.first(where: { sourceID($0) == desired }) else { fatalError("Missing layout \(desired)") }
 guard TISEnableInputSource(source) == noErr, TISSelectInputSource(source) == noErr else { fatalError("Cannot select layout") }
 guard sourceID(TISCopyCurrentKeyboardInputSource().takeRetainedValue()) == desired else { fatalError("Layout did not activate") }
