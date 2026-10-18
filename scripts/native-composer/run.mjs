@@ -1,24 +1,25 @@
-import assert from "node:assert/strict";
-import { spawn, execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { createRequire } from "node:module";
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
+import * as NodeAssert from "node:assert/strict";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeUtil from "node:util";
+import * as NodeModule from "node:module";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+import * as NodeProcess from "node:process";
 
-const run = promisify(execFile);
-const requireWeb = createRequire(path.resolve("apps/web/package.json"));
-const requireDesktop = createRequire(path.resolve("apps/desktop/package.json"));
+const run = NodeUtil.promisify(NodeChildProcess.execFile);
+const requireWeb = NodeModule.createRequire(NodePath.resolve("apps/web/package.json"));
+const requireDesktop = NodeModule.createRequire(NodePath.resolve("apps/desktop/package.json"));
 const { _electron } = requireWeb("playwright");
-const results = path.resolve(".native-composer-results");
-await mkdir(results, { recursive: true });
+const results = NodePath.resolve(".native-composer-results");
+await NodeFSP.mkdir(results, { recursive: true });
 const logs = [];
-const server = spawn(
-  process.platform === "win32" ? "vp.cmd" : "vp",
+const server = NodeChildProcess.spawn(
+  NodeProcess.platform === "win32" ? "vp.cmd" : "vp",
   ["dev", "--host", "127.0.0.1", "--port", "5733"],
   {
-    cwd: path.resolve("apps/web"),
-    shell: process.platform === "win32",
-    env: { ...process.env, T3CODE_SINGLE_ORIGIN_DEV: "1" },
+    cwd: NodePath.resolve("apps/web"),
+    shell: NodeProcess.platform === "win32",
+    env: { ...NodeProcess.env, T3CODE_SINGLE_ORIGIN_DEV: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
@@ -38,29 +39,29 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   const env = {
-    ...process.env,
+    ...NodeProcess.env,
     NATIVE_COMPOSER_URL: "http://127.0.0.1:5733/native-composer.html",
-    T3CODE_HOME: path.join(results, "profile"),
+    T3CODE_HOME: NodePath.join(results, "profile"),
     T3CODE_DISABLE_AUTO_UPDATE: "true",
   };
   delete env.ELECTRON_RUN_AS_NODE;
   electron = await _electron.launch({
     executablePath: requireDesktop("electron"),
     args: [
-      path.resolve("scripts/native-composer/electron.cjs"),
-      `--user-data-dir=${path.join(results, "electron")}`,
+      NodePath.resolve("scripts/native-composer/electron.cjs"),
+      `--user-data-dir=${NodePath.join(results, "electron")}`,
     ],
     env,
     timeout: 120_000,
-    recordVideo: { dir: path.join(results, "video"), size: { width: 1000, height: 600 } },
+    recordVideo: { dir: NodePath.join(results, "video"), size: { width: 1000, height: 600 } },
   });
   page = await electron.firstWindow();
   page.on("pageerror", (error) => logs.push(error.stack));
   await page.waitForFunction(() => Boolean(window.nativeComposer), { timeout: 120_000 });
-  const hwnd = await electron.evaluate(({ BrowserWindow }) => {
+  const hwnd = await electron.evaluate(({ BrowserWindow }, windows) => {
     const buffer = BrowserWindow.getAllWindows()[0].getNativeWindowHandle();
-    return process.platform === "win32" ? buffer.readBigUInt64LE().toString() : "0";
-  });
+    return windows ? buffer.readBigUInt64LE().toString() : "0";
+  }, NodeProcess.platform === "win32");
   const pid = electron.process().pid;
   async function keys(layout, sequence) {
     await electron.evaluate(({ BrowserWindow }) => {
@@ -69,13 +70,13 @@ try {
       window.focus();
     });
     const result =
-      process.platform === "win32"
+      NodeProcess.platform === "win32"
         ? await run(
             "pwsh",
             [
               "-NoProfile",
               "-File",
-              path.resolve("scripts/native-composer/windows.ps1"),
+              NodePath.resolve("scripts/native-composer/windows.ps1"),
               "-Layout",
               layout === "intl" ? "00020409" : "00000409",
               "-Keys",
@@ -86,7 +87,7 @@ try {
             { timeout: 30_000 },
           )
         : await run(
-            path.resolve("scripts/native-composer/macos-input"),
+            NodePath.resolve("scripts/native-composer/macos-input"),
             [layout, sequence, String(pid)],
             { timeout: 30_000 },
           );
@@ -110,12 +111,12 @@ try {
       { timeout: 5000 },
     );
     const events = await page.evaluate(() => window.keyboardEvents);
-    assert(
+    NodeAssert.ok(
       events.some((event) => event.type === "keydown" && event.trusted),
       "Native input did not reach the browser",
     );
     if (layout === "intl")
-      assert(
+      NodeAssert.ok(
         events.some((event) => event.key === "Dead" || event.type === "compositionstart"),
         "No native dead-key evidence",
       );
@@ -202,7 +203,7 @@ try {
         },
         { test, richText },
       );
-      await page.screenshot({ path: path.join(results, `${name}-before.png`) });
+      await page.screenshot({ path: NodePath.join(results, `${name}-before.png`) });
       let failure;
       try {
         await keys(test.layout, test.sequence);
@@ -215,21 +216,21 @@ try {
           { timeout: 5000 },
         );
         const state = await page.evaluate(() => window.nativeComposer.snapshot());
-        assert.equal(state.selected, test.selection ?? "");
+        NodeAssert.equal(state.selected, test.selection ?? "");
         if (test.selection) {
           const evidence = await page.evaluate(() => window.nativeComposer.evidence());
-          assert(
+          NodeAssert.ok(
             evidence.events.every((event) => event.text.includes(test.text)),
             "Selected text disappeared in a transaction",
           );
-          assert(
+          NodeAssert.ok(
             evidence.frames.every((text) => text.includes(test.text)),
             "Selected text disappeared in a rendered frame",
           );
           const undo = await page.evaluate(() => window.nativeComposer.undo());
-          assert.equal(undo.text, test.text, "Undo did not restore the original text");
+          NodeAssert.equal(undo.text, test.text, "Undo did not restore the original text");
           const redo = await page.evaluate(() => window.nativeComposer.redo());
-          assert.equal(redo.text, test.expected, "Redo did not restore wrapping");
+          NodeAssert.equal(redo.text, test.expected, "Redo did not restore wrapping");
         }
       } catch (error) {
         failure = String(error);
@@ -240,18 +241,21 @@ try {
         keyboard: window.keyboardEvents,
       }));
       report.push({ name, ...test, richText, failure, ...evidence });
-      await page.screenshot({ path: path.join(results, `${name}-after.png`) });
-      await writeFile(path.join(results, "report.json"), JSON.stringify(report, null, 2));
+      await page.screenshot({ path: NodePath.join(results, `${name}-after.png`) });
+      await NodeFSP.writeFile(
+        NodePath.join(results, "report.json"),
+        JSON.stringify(report, null, 2),
+      );
       console.log(`${failure ? "FAIL" : "PASS"} ${name}${failure ? `: ${failure}` : ""}`);
     }
   }
   if (failures) throw new Error(`${failures} native composer cases failed`);
 } catch (error) {
-  await writeFile(path.join(results, "failure.txt"), error.stack ?? String(error));
+  await NodeFSP.writeFile(NodePath.join(results, "failure.txt"), error.stack ?? String(error));
   if (page) {
-    await page.screenshot({ path: path.join(results, "failure.png") }).catch(() => {});
-    await writeFile(
-      path.join(results, "keyboard-events.json"),
+    await page.screenshot({ path: NodePath.join(results, "failure.png") }).catch(() => {});
+    await NodeFSP.writeFile(
+      NodePath.join(results, "keyboard-events.json"),
       JSON.stringify(
         await page.evaluate(() => window.keyboardEvents ?? []).catch(() => []),
         null,
@@ -261,8 +265,8 @@ try {
   }
   throw error;
 } finally {
-  await writeFile(path.join(results, "report.json"), JSON.stringify(report, null, 2));
-  await writeFile(path.join(results, "runner.log"), logs.join("\n"));
+  await NodeFSP.writeFile(NodePath.join(results, "report.json"), JSON.stringify(report, null, 2));
+  await NodeFSP.writeFile(NodePath.join(results, "runner.log"), logs.join("\n"));
   if (electron) await electron.close();
   server.kill();
 }
