@@ -1,0 +1,62 @@
+name: Native Linux composer keyboard
+
+on:
+  push:
+    branches: [test/composer-linux-input]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-linux:
+    if: github.repository == 'Gustav0ar/t3code'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [x11, wayland]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+      - name: Install native display dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sway xvfb openbox x11-xkb-utils libxtst-dev libwayland-dev libxkbcommon-dev dbus-x11
+      - name: Install test dependencies
+        run: vp install --frozen-lockfile --filter @t3tools/web... --filter @t3tools/desktop...
+      - name: Ensure Electron and video encoder
+        run: |
+          node apps/desktop/scripts/ensure-electron-runtime.mjs
+          node apps/web/node_modules/playwright/cli.js install ffmpeg
+      - name: Compile native key driver
+        run: |
+          cd scripts/native-composer
+          wayland-scanner client-header virtual-keyboard-unstable-v1.xml virtual-keyboard-client.h
+          wayland-scanner private-code virtual-keyboard-unstable-v1.xml virtual-keyboard-protocol.c
+          cc -Wall -Wextra -Werror linux.c virtual-keyboard-protocol.c -o linux-input $(pkg-config --cflags --libs wayland-client xkbcommon x11 xtst)
+      - name: Test native X11 input
+        if: matrix.backend == 'x11'
+        run: xvfb-run -a -s '-screen 0 1280x800x24 -nolisten tcp' dbus-run-session -- node scripts/native-composer/linux-session.mjs x11
+      - name: Test native Wayland input
+        if: matrix.backend == 'wayland'
+        run: dbus-run-session -- node scripts/native-composer/linux-session.mjs wayland
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-composer-linux-${{ matrix.backend }}
+          path: .native-composer-results/
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 90

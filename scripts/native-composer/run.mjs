@@ -12,6 +12,9 @@ const requireWeb = NodeModule.createRequire(NodePath.resolve("apps/web/package.j
 const requireDesktop = NodeModule.createRequire(NodePath.resolve("apps/desktop/package.json"));
 const { _electron } = requireWeb("playwright");
 const baseline = NodeProcess.env.NATIVE_COMPOSER_BASELINE === "1";
+const backend = NodeProcess.env.NATIVE_COMPOSER_BACKEND;
+if (NodeProcess.platform === "linux" && backend !== "x11" && backend !== "wayland")
+  throw new Error("Linux native tests require an explicit display backend");
 const phase = baseline ? "baseline" : "fixed";
 const results = NodePath.resolve(".native-composer-results", phase);
 const profileRoot = NodePath.join(
@@ -55,6 +58,7 @@ try {
     args: [
       NodePath.resolve("scripts/native-composer/electron.cjs"),
       `--user-data-dir=${NodePath.join(profileRoot, "electron")}`,
+      ...(NodeProcess.platform === "linux" ? [`--ozone-platform=${backend}`, "--no-sandbox"] : []),
     ],
     env,
     timeout: 120_000,
@@ -64,38 +68,82 @@ try {
   page.on("pageerror", (error) => logs.push(error.stack));
   await page.waitForFunction(() => Boolean(window.nativeComposer), undefined, { timeout: 120_000 });
   const hwnd = await electron.evaluate(({ BrowserWindow }, windows) => {
+    if (!windows) return "0";
     const buffer = BrowserWindow.getAllWindows()[0].getNativeWindowHandle();
-    return windows ? buffer.readBigUInt64LE().toString() : "0";
+    return buffer.readBigUInt64LE().toString();
   }, NodeProcess.platform === "win32");
   const pid = electron.process().pid;
+  if (NodeProcess.platform === "linux") {
+    const metadata = await electron.evaluate(({ app }) => ({
+      appVersion: app.getVersion(),
+      runtime: process.versions.electron,
+      argv: process.argv,
+      backend: process.env.NATIVE_COMPOSER_BACKEND,
+      display: process.env.DISPLAY ?? null,
+      waylandDisplay: process.env.WAYLAND_DISPLAY ?? null,
+      inputMethod: process.env.GTK_IM_MODULE,
+    }));
+    await NodeFSP.writeFile(
+      NodePath.join(results, "environment.json"),
+      JSON.stringify(metadata, null, 2),
+    );
+    if (backend === "wayland") {
+      NodeAssert.equal(metadata.display, null, "Wayland test must not expose an X11 display");
+      const tree = await run("swaymsg", ["-t", "get_tree"]);
+      await NodeFSP.writeFile(NodePath.join(results, "display-tree.json"), tree.stdout);
+      NodeAssert.match(
+        tree.stdout,
+        /xdg_shell/,
+        "Electron did not create a native Wayland surface",
+      );
+    }
+  }
+  let linuxLayout;
   async function keys(layout, sequence) {
     await electron.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0];
       window.show();
       window.focus();
     });
+    if (NodeProcess.platform === "linux" && backend === "x11" && linuxLayout !== layout) {
+      const mapped = await run("setxkbmap", [
+        "-layout",
+        "us",
+        "-variant",
+        layout === "intl" ? "intl" : "",
+      ]);
+      const query = await run("setxkbmap", ["-query"]);
+      logs.push(mapped.stdout, mapped.stderr, query.stdout);
+      linuxLayout = layout;
+    }
     const result =
-      NodeProcess.platform === "win32"
+      NodeProcess.platform === "linux"
         ? await run(
-            "pwsh",
-            [
-              "-NoProfile",
-              "-File",
-              NodePath.resolve("scripts/native-composer/windows.ps1"),
-              "-Layout",
-              layout === "intl" ? "00020409" : "00000409",
-              "-Keys",
-              sequence,
-              "-WindowHandle",
-              hwnd,
-            ],
+            NodePath.resolve("scripts/native-composer/linux-input"),
+            [backend, layout, sequence],
             { timeout: 30_000 },
           )
-        : await run(
-            NodePath.resolve("scripts/native-composer/macos-input"),
-            [layout, sequence, String(pid)],
-            { timeout: 30_000 },
-          );
+        : NodeProcess.platform === "win32"
+          ? await run(
+              "pwsh",
+              [
+                "-NoProfile",
+                "-File",
+                NodePath.resolve("scripts/native-composer/windows.ps1"),
+                "-Layout",
+                layout === "intl" ? "00020409" : "00000409",
+                "-Keys",
+                sequence,
+                "-WindowHandle",
+                hwnd,
+              ],
+              { timeout: 30_000 },
+            )
+          : await run(
+              NodePath.resolve("scripts/native-composer/macos-input"),
+              [layout, sequence, String(pid)],
+              { timeout: 30_000 },
+            );
     logs.push(result.stdout, result.stderr);
   }
   let activeLayout;
@@ -343,7 +391,7 @@ try {
     } catch (error) {
       if (error.code !== "ESRCH") {
         console.error(error);
-        NodeProcess.exitCode = 1;
+        NodeProcess.default.exitCode = 1;
       }
     }
   }
