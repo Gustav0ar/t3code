@@ -948,6 +948,7 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
   const editorHolder = useRef<TiptapEditor | null>(null);
   const compositionSelectionRef = useRef<{
     state: EditorState;
+    inputState: EditorState;
     compositionId: number | null;
   } | null>(null);
 
@@ -1190,12 +1191,17 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
             const selection = TextSelection.between(state.selection.$from, state.selection.$to);
             if (canSurroundComposerRange(state.doc, selection.from, selection.to)) {
               if (!selection.eq(state.selection)) view.dispatch(state.tr.setSelection(selection));
-              compositionSelectionRef.current = { state: view.state, compositionId: null };
+              const selectedState = view.state;
               // Wayland reports Process on keydown and Dead only on keyup. Collapse
               // before composition starts so native input leaves the selected text in place.
               view.dispatch(
                 view.state.tr.setSelection(TextSelection.create(view.state.doc, selection.from)),
               );
+              compositionSelectionRef.current = {
+                state: selectedState,
+                inputState: view.state,
+                compositionId: null,
+              };
             } else {
               compositionSelectionRef.current = null;
             }
@@ -1390,17 +1396,35 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
           return handled;
         },
         handleTextInput: (view, from, to, text) => {
-          if (literalText || text.length !== 1) return false;
-          const closer = SURROUND_CLOSE[text];
+          if (literalText) return false;
+          const pending = compositionSelectionRef.current;
+          // Windows dead keys commit text without starting an IME composition.
+          const preserved =
+            pending &&
+            !view.composing &&
+            view.state === pending.inputState &&
+            from === to &&
+            from === pending.state.selection.from
+              ? pending.state.selection
+              : null;
+          if (preserved) compositionSelectionRef.current = null;
+          const closer = text.length === 1 ? SURROUND_CLOSE[text] : undefined;
+          if (!closer) {
+            if (!preserved) return false;
+            view.dispatch(view.state.tr.insertText(text, preserved.from, preserved.to));
+            return true;
+          }
+          const range = preserved ?? { from, to };
           // Composition replacement ranges can span text without an actual selection.
           if (
-            !closer ||
-            view.state.selection.empty ||
-            !canSurroundComposerRange(view.state.doc, from, to)
+            (view.state.selection.empty && !preserved) ||
+            !canSurroundComposerRange(view.state.doc, range.from, range.to)
           )
             return false;
-          const tr = view.state.tr.insertText(closer, to).insertText(text, from);
-          tr.setSelection(TextSelection.create(tr.doc, from + text.length, to + text.length));
+          const tr = view.state.tr.insertText(closer, range.to).insertText(text, range.from);
+          tr.setSelection(
+            TextSelection.create(tr.doc, range.from + text.length, range.to + text.length),
+          );
           view.dispatch(tr);
           return true;
         },

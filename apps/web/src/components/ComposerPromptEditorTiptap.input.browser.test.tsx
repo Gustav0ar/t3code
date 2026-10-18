@@ -155,6 +155,29 @@ it("lets an accented letter replace the selection", async () => {
   expect(editor.state.selection.empty).toBe(true);
 });
 
+it.each([
+  { text: "'", expected: "'word'", selected: "word" },
+  { text: '"', expected: '"word"', selected: "word" },
+  { text: "é", expected: "é", selected: "" },
+])("resolves dead keys without composition events: %j", async ({ text, expected, selected }) => {
+  const editor = await mountEditor("word", true);
+  await act(async () => {
+    editor.commands.setTextSelection({ from: 1, to: 5 });
+    editor.view.dom.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Dead", code: "Quote", bubbles: true }),
+    );
+    insertText(editor, 1, 1, text);
+  });
+  expect(editor.state.doc.textContent).toBe(expected);
+  expect(editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to)).toBe(
+    selected,
+  );
+  await act(async () => {
+    editor.commands.undo();
+  });
+  expect(editor.state.doc.textContent).toBe("word");
+});
+
 it("does not restore a composition selection after the draft is replaced", async () => {
   const editor = await mountEditor("word", true);
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
