@@ -89,6 +89,20 @@ try {
           );
     logs.push(result.stdout, result.stderr);
   }
+  let activeLayout;
+  async function prepareLayout(layout) {
+    if (activeLayout === layout) return;
+    await page.locator("#control").evaluate((element) => {
+      element.value = "";
+      element.focus();
+    });
+    // Prime Chromium's layout map with a regular key before testing dead-key state.
+    await keys(layout, "e");
+    await page.waitForFunction(() => document.querySelector("#control").value === "e", undefined, {
+      timeout: 5000,
+    });
+    activeLayout = layout;
+  }
   // A native textarea proves the layout and OS injection work before any composer verdict.
   let probeFailures = 0;
   for (const [layout, sequence, expected] of [
@@ -98,6 +112,7 @@ try {
     ["intl", "quote,space", "'"],
     ["intl", "quote,e", "é"],
   ]) {
+    await prepareLayout(layout);
     await page.locator("#control").evaluate((element) => {
       element.value = "";
       element.focus();
@@ -227,6 +242,7 @@ try {
   for (const richText of [true, false]) {
     for (const test of cases) {
       const name = `${richText ? "rich" : "plain"}-${test.name}`;
+      await prepareLayout(test.layout);
       await page.evaluate(
         ({ test, richText }) => {
           window.nativeComposer.mount(test.text, test.selected, richText);

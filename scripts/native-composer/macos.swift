@@ -12,7 +12,13 @@ let desired = args[1] == "intl" ? "com.apple.keylayout.USInternational-PC" : "co
 let sources = TISCreateInputSourceList(nil, true).takeRetainedValue() as! [TISInputSource]
 guard let source = sources.first(where: { sourceID($0) == desired }) else { fatalError("Missing layout \(desired)") }
 guard TISEnableInputSource(source) == noErr, TISSelectInputSource(source) == noErr else { fatalError("Cannot select layout") }
-guard sourceID(TISCopyCurrentKeyboardInputSource().takeRetainedValue()) == desired else { fatalError("Layout did not activate") }
+let deadline = Date().addingTimeInterval(3)
+while sourceID(TISCopyCurrentKeyboardInputSource().takeRetainedValue()) != desired && Date() < deadline {
+  RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+}
+guard sourceID(TISCopyCurrentKeyboardInputSource().takeRetainedValue()) == desired else {
+  fatalError("Layout did not activate: \(sourceID(TISCopyCurrentKeyboardInputSource().takeRetainedValue()))")
+}
 guard CGPreflightPostEventAccess() else { fatalError("Runner does not permit native event posting") }
 guard let app = NSRunningApplication(processIdentifier: pid_t(args[3])!) else { fatalError("No Electron process") }
 app.activate(options: [.activateIgnoringOtherApps])
