@@ -47,4 +47,5 @@ jobs:
           name: native-composer-${{ matrix.os }}
           path: .native-composer-results/
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 7

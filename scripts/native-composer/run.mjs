@@ -13,16 +13,12 @@ const { _electron } = requireWeb("playwright");
 const results = NodePath.resolve(".native-composer-results");
 await NodeFSP.mkdir(results, { recursive: true });
 const logs = [];
-const server = NodeChildProcess.spawn(
-  NodeProcess.platform === "win32" ? "vp.cmd" : "vp",
-  ["dev", "--host", "127.0.0.1", "--port", "5733"],
-  {
-    cwd: NodePath.resolve("apps/web"),
-    shell: NodeProcess.platform === "win32",
-    env: { ...NodeProcess.env, T3CODE_SINGLE_ORIGIN_DEV: "1" },
-    stdio: ["ignore", "pipe", "pipe"],
-  },
-);
+const server = NodeChildProcess.spawn("vp", ["dev", "--host", "127.0.0.1", "--port", "5733"], {
+  cwd: NodePath.resolve("apps/web"),
+  shell: NodeProcess.platform === "win32",
+  env: { ...NodeProcess.env, T3CODE_SINGLE_ORIGIN_DEV: "1" },
+  stdio: ["ignore", "pipe", "pipe"],
+});
 server.stdout.on("data", (value) => logs.push(value.toString()));
 server.stderr.on("data", (value) => logs.push(value.toString()));
 const report = [];
@@ -57,7 +53,7 @@ try {
   });
   page = await electron.firstWindow();
   page.on("pageerror", (error) => logs.push(error.stack));
-  await page.waitForFunction(() => Boolean(window.nativeComposer), { timeout: 120_000 });
+  await page.waitForFunction(() => Boolean(window.nativeComposer), undefined, { timeout: 120_000 });
   const hwnd = await electron.evaluate(({ BrowserWindow }, windows) => {
     const buffer = BrowserWindow.getAllWindows()[0].getNativeWindowHandle();
     return windows ? buffer.readBigUInt64LE().toString() : "0";
