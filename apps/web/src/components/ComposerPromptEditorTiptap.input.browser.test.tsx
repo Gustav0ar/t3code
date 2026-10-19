@@ -17,9 +17,9 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   await act(async () => root.unmount());
   container.remove();
-  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -76,6 +76,19 @@ function typeText(editor: Editor, from: number, to: number, text: string) {
   ) {
     editor.view.dispatch(insert());
   }
+}
+
+function dispatchComposition(
+  editor: Editor,
+  type: "compositionstart" | "compositionend",
+  data = "",
+) {
+  editor.view.dom.dispatchEvent(new CompositionEvent(type, { bubbles: true, data }));
+}
+
+async function finishComposition(editor: Editor, text: string) {
+  dispatchComposition(editor, "compositionend", text);
+  await vi.advanceTimersByTimeAsync(0);
 }
 
 it.each([false, true])(
@@ -162,19 +175,14 @@ it.each([
         }),
       );
       expect(editor.state.selection.empty).toBe(true);
-      editor.view.dom.dispatchEvent(
-        new CompositionEvent("compositionstart", { bubbles: true, data: "word" }),
-      );
+      dispatchComposition(editor, "compositionstart", "word");
       editor.view.dispatch(
         editor.state.tr.insertText(quote === "'" ? "´" : "¨").setMeta("composition", 1),
       );
       expect(editor.state.doc.textContent).toBe(`before ${quote === "'" ? "´" : "¨"}word after`);
       typeText(editor, 8, 9, quote);
       expect(editor.state.doc.textContent).toBe(`before ${quote}word after`);
-      editor.view.dom.dispatchEvent(
-        new CompositionEvent("compositionend", { bubbles: true, data: quote }),
-      );
-      await vi.advanceTimersByTimeAsync(0);
+      await finishComposition(editor, quote);
     });
     expect(serializeEditorDoc(editor.state.doc).value).toBe(`before ${quote}word${quote} after`);
     expect(
@@ -197,13 +205,10 @@ it("lets an accented letter replace the selection", async () => {
   await act(async () => {
     editor.commands.setTextSelection({ from: 1, to: 5 });
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
-    editor.view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    dispatchComposition(editor, "compositionstart");
     editor.view.dispatch(editor.state.tr.insertText("´").setMeta("composition", 1));
     typeText(editor, 1, 2, "é");
-    editor.view.dom.dispatchEvent(
-      new CompositionEvent("compositionend", { bubbles: true, data: "é" }),
-    );
-    await vi.advanceTimersByTimeAsync(0);
+    await finishComposition(editor, "é");
     typeText(editor, 2, 2, "'");
   });
   expect(serializeEditorDoc(editor.state.doc).value).toBe("é'");
@@ -239,11 +244,9 @@ it("does not restore a composition selection after the draft is replaced", async
   await act(async () => {
     editor.commands.setTextSelection({ from: 1, to: 5 });
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
-    editor.view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    dispatchComposition(editor, "compositionstart");
     editor.view.dispatch(editor.state.tr.insertText("'").setMeta("composition", 1));
-    editor.view.dom.dispatchEvent(
-      new CompositionEvent("compositionend", { bubbles: true, data: "'" }),
-    );
+    dispatchComposition(editor, "compositionend", "'");
     editor.commands.setContent("new draft");
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -256,13 +259,10 @@ it("keeps the original selection when dead-key composition is cancelled", async 
   await act(async () => {
     editor.commands.setTextSelection({ from: 1, to: 5 });
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
-    editor.view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    dispatchComposition(editor, "compositionstart");
     editor.view.dispatch(editor.state.tr.insertText("´").setMeta("composition", 1));
     typeText(editor, 1, 2, "");
-    editor.view.dom.dispatchEvent(
-      new CompositionEvent("compositionend", { bubbles: true, data: "" }),
-    );
-    await vi.advanceTimersByTimeAsync(0);
+    await finishComposition(editor, "");
   });
   expect(serializeEditorDoc(editor.state.doc).value).toBe("word");
   expect(editor.state.selection.from).toBe(1);
@@ -274,13 +274,10 @@ it("leaves other input methods free to replace selected text during composition"
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   await act(async () => {
     editor.commands.setTextSelection({ from: 1, to: 5 });
-    editor.view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    dispatchComposition(editor, "compositionstart");
     editor.view.dispatch(editor.state.tr.insertText("字").setMeta("composition", 1));
     expect(editor.state.doc.textContent).toBe("字");
-    editor.view.dom.dispatchEvent(
-      new CompositionEvent("compositionend", { bubbles: true, data: "字" }),
-    );
-    await vi.advanceTimersByTimeAsync(0);
+    await finishComposition(editor, "字");
   });
   expect(serializeEditorDoc(editor.state.doc).value).toBe("字");
 });
@@ -291,15 +288,12 @@ it("keeps select-all text in place while a dead key resolves", async () => {
   await act(async () => {
     editor.commands.selectAll();
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
-    editor.view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    dispatchComposition(editor, "compositionstart");
     expect(editor.state.selection.from).toBe(1);
     editor.view.dispatch(editor.state.tr.insertText("´").setMeta("composition", 1));
     expect(editor.state.doc.textContent).toBe("´word");
     typeText(editor, 1, 2, "'");
-    editor.view.dom.dispatchEvent(
-      new CompositionEvent("compositionend", { bubbles: true, data: "'" }),
-    );
-    await vi.advanceTimersByTimeAsync(0);
+    await finishComposition(editor, "'");
   });
   expect(serializeEditorDoc(editor.state.doc).value).toBe("'word'");
 });
@@ -312,12 +306,9 @@ it("does not reuse a dead-key selection after the caret moves away and back", as
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
     editor.commands.setTextSelection(5);
     editor.commands.setTextSelection(1);
-    editor.view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    dispatchComposition(editor, "compositionstart");
     typeText(editor, 1, 1, "'");
-    editor.view.dom.dispatchEvent(
-      new CompositionEvent("compositionend", { bubbles: true, data: "'" }),
-    );
-    await vi.advanceTimersByTimeAsync(0);
+    await finishComposition(editor, "'");
   });
   expect(editor.state.doc.textContent).toBe("'word");
   expect(editor.state.selection.empty).toBe(true);
@@ -329,12 +320,9 @@ it("lets a dead key replace a selected node", async () => {
   await act(async () => {
     editor.commands.setNodeSelection(0);
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
-    editor.view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    dispatchComposition(editor, "compositionstart");
     typeText(editor, editor.state.selection.from, editor.state.selection.to, "'");
-    editor.view.dom.dispatchEvent(
-      new CompositionEvent("compositionend", { bubbles: true, data: "'" }),
-    );
-    await vi.advanceTimersByTimeAsync(0);
+    await finishComposition(editor, "'");
   });
   expect(editor.state.doc.textContent).toBe("'");
 });

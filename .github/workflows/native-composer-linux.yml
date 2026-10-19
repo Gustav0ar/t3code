@@ -2,7 +2,7 @@ name: Native Linux composer keyboard
 
 on:
   push:
-    branches: [test/composer-linux-input]
+    branches: [test/composer-input-simplified]
   workflow_dispatch:
 
 permissions:

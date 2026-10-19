@@ -2,7 +2,7 @@ name: Native composer keyboard
 
 on:
   push:
-    branches: [test/composer-native-input-review]
+    branches: [test/composer-input-simplified]
   workflow_dispatch:
 
 permissions:
@@ -47,18 +47,6 @@ jobs:
       - name: Compile macOS key driver
         if: runner.os == 'macOS'
         run: swiftc scripts/native-composer/macos.swift -o scripts/native-composer/macos-input
-      - name: Record macOS baseline
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          NATIVE_COMPOSER_BASELINE: "1"
-        run: |
-          composer_source=apps/web/src/components/ComposerPromptEditorTiptap.tsx
-          cp "$composer_source" "$RUNNER_TEMP/composer-fixed.tsx"
-          trap 'cp "$RUNNER_TEMP/composer-fixed.tsx" "$composer_source"' EXIT
-          git fetch --no-tags --depth=1 origin b72740852ffb5ab727e1ae7c042d9e89533bc341
-          git show b72740852ffb5ab727e1ae7c042d9e89533bc341:"$composer_source" > "$composer_source"
-          node scripts/native-composer/run.mjs
       - name: Native keyboard test
         run: node scripts/native-composer/run.mjs
       - name: Upload evidence
