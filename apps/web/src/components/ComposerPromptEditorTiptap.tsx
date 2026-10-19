@@ -1157,15 +1157,10 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
               const tr = view.state.tr;
               const start = from + text.length;
               const end = to + text.length;
-              if (closer) {
-                tr.insertText(closer, end);
-                tr.setSelection(TextSelection.create(tr.doc, start, end));
-              } else if (text.length > 0) {
-                tr.delete(start, end);
-                tr.setSelection(TextSelection.create(tr.doc, start));
-              } else {
-                tr.setSelection(TextSelection.create(tr.doc, from, to));
-              }
+              const replaceSelection = text.length > 0 && !closer;
+              if (closer) tr.insertText(closer, end);
+              else if (replaceSelection) tr.delete(start, end);
+              tr.setSelection(TextSelection.create(tr.doc, start, replaceSelection ? start : end));
               if (previous.compositionId !== null)
                 tr.setMeta("composition", previous.compositionId);
               view.dispatch(tr);
@@ -1415,7 +1410,6 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
           // A preedit replacement range is not necessarily the user's selection.
           if (
             !(selection instanceof TextSelection) ||
-            selection.empty ||
             (!preserved && (selection.from !== from || selection.to !== to)) ||
             !canSurroundComposerRange(view.state.doc, selection.from, selection.to)
           ) {
