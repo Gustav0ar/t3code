@@ -465,7 +465,7 @@ it.each([
   async ({ quote, richTextEnabled, key }) => {
     await using screen = await mountEditor("before word after", richTextEnabled);
     const { editor } = screen;
-    using _timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    using _timers = fakeTimers();
     await act(async () => {
       editor.commands.setTextSelection({ from: 8, to: 12 });
       editor.view.dom.dispatchEvent(
@@ -504,7 +504,7 @@ it.each([
 it("lets an accented letter replace the selection", async () => {
   await using screen = await mountEditor("word", true);
   const { editor } = screen;
-  using _timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  using _timers = fakeTimers();
   await act(async () => {
     editor.commands.setTextSelection({ from: 1, to: 5 });
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
@@ -545,7 +545,7 @@ it.each([
 it("does not restore a composition selection after the draft is replaced", async () => {
   await using screen = await mountEditor("word", true);
   const { editor } = screen;
-  using _timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  using _timers = fakeTimers();
   await act(async () => {
     editor.commands.setTextSelection({ from: 1, to: 5 });
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
@@ -561,7 +561,7 @@ it("does not restore a composition selection after the draft is replaced", async
 it("keeps the original selection when dead-key composition is cancelled", async () => {
   await using screen = await mountEditor("word", true);
   const { editor } = screen;
-  using _timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  using _timers = fakeTimers();
   await act(async () => {
     editor.commands.setTextSelection({ from: 1, to: 5 });
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
@@ -578,7 +578,7 @@ it("keeps the original selection when dead-key composition is cancelled", async 
 it("leaves other input methods free to replace selected text during composition", async () => {
   await using screen = await mountEditor("word", true);
   const { editor } = screen;
-  using _timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  using _timers = fakeTimers();
   await act(async () => {
     editor.commands.setTextSelection({ from: 1, to: 5 });
     dispatchComposition(editor, "compositionstart");
@@ -592,7 +592,7 @@ it("leaves other input methods free to replace selected text during composition"
 it("keeps select-all text in place while a dead key resolves", async () => {
   await using screen = await mountEditor("word", true);
   const { editor } = screen;
-  using _timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  using _timers = fakeTimers();
   await act(async () => {
     editor.commands.selectAll();
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
@@ -609,7 +609,7 @@ it("keeps select-all text in place while a dead key resolves", async () => {
 it("does not reuse a dead-key selection after the caret moves away and back", async () => {
   await using screen = await mountEditor("word");
   const { editor } = screen;
-  using _timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  using _timers = fakeTimers();
   await act(async () => {
     editor.commands.setTextSelection({ from: 1, to: 5 });
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
@@ -626,7 +626,7 @@ it("does not reuse a dead-key selection after the caret moves away and back", as
 it("lets a dead key replace a selected node", async () => {
   await using screen = await mountEditor("word");
   const { editor } = screen;
-  using _timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  using _timers = fakeTimers();
   await act(async () => {
     editor.commands.setNodeSelection(0);
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));
@@ -640,7 +640,7 @@ it("lets a dead key replace a selected node", async () => {
 it("surrounds a selection when a dead-key quote commits", async () => {
   await using screen = await mountEditor("word");
   const { editor } = screen;
-  using _timers = fakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  using _timers = fakeTimers();
   await act(async () => {
     editor.commands.setTextSelection({ from: 1, to: 5 });
     editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", bubbles: true }));

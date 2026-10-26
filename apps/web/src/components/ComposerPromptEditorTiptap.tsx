@@ -1001,7 +1001,6 @@ function ComposerPromptEditorTiptapInner(
     literalText ? position : expandCollapsedComposerCursor(text, position);
 
   const latestValueRef = useRef(value);
-  const editorHolder = useRef<TiptapEditor | null>(null);
   const deadKeySelectionRef = useRef<{
     selection: TextSelection;
     inputState: EditorState;
